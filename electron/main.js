@@ -48,8 +48,8 @@ ipcMain.handle('scan:run', async (_, options) => {
     progress({ stage: 'ai', message: 'Selecting an available free OpenRouter model…', percent: 84 });
     try {
       const model = await selectFreeModel(settings.apiKey);
-      report.ai = await analyzeWithOpenRouter(settings.apiKey, model, report);
-      report.ai.model = model;
+      report.ai = await analyzeWithOpenRouter(settings.apiKey, model, report, { progress });
+
     } catch (error) { report.ai = { error: error.message }; }
   }
   progress({ stage: 'done', message: 'Scan complete', percent: 100 });
