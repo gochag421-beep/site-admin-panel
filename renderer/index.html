@@ -1,9 +1,54 @@
-<!doctype html><html lang="el"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:"><title>Vexon Security Scanner</title><link rel="stylesheet" href="styles.css"></head><body>
-<aside><div class="brand"><div class="logo">V</div><div><b>VEXON</b><small>SECURITY SCANNER</small></div></div><nav><button class="nav active" data-view="scanner">⌁ <span>Νέα σάρωση</span></button><button class="nav" data-view="reports">▤ <span>Αποτελέσματα</span></button><button class="nav" data-view="settings">⚙ <span>Ρυθμίσεις</span></button></nav><div class="safe"><i>✓</i><div><b>Defensive Mode</b><small>Παθητικοί, ασφαλείς έλεγχοι</small></div></div></aside>
-<main><header><div><p class="eyebrow">WEBSITE SECURITY</p><h1 id="pageTitle">Έλεγχος ασφαλείας</h1></div><div class="status"><span></span> Scanner ready</div></header>
-<section id="scanner" class="view active"><div class="hero card"><div><span class="shield">◈</span><h2>Έλεγξε την ιστοσελίδα σου</h2><p>Ανάλυση TLS, security headers, cookies, CORS, mixed content και ρυθμίσεων. Το OpenRouter μετατρέπει τα τεχνικά ευρήματα σε καθαρό πλάνο διόρθωσης.</p></div><form id="scanForm"><label>Διεύθυνση ιστοσελίδας</label><div class="urlrow"><input id="target" type="url" placeholder="https://example.gr" required><button id="scanBtn" type="submit">Έναρξη σάρωσης →</button></div><label class="check"><input id="authorized" type="checkbox" required><span>Επιβεβαιώνω ότι μου ανήκει η ιστοσελίδα ή έχω γραπτή άδεια ελέγχου.</span></label></form></div>
-<div id="progressCard" class="card progress hidden"><div class="spinner"></div><div><b id="progressText">Προετοιμασία…</b><small>Μην κλείσεις την εφαρμογή</small></div><div class="bar"><i id="progressBar"></i></div><strong id="progressPct">0%</strong></div>
-<div class="features"><article><i>⌁</i><h3>TLS & HTTPS</h3><p>Πιστοποιητικό, λήξη, trust chain και μη ασφαλείς ανακατευθύνσεις.</p></article><article><i>☷</i><h3>Headers & Cookies</h3><p>CSP, HSTS, προστασία browser, Secure, HttpOnly και SameSite.</p></article><article><i>✦</i><h3>AI Remediation</h3><p>Αυτόματη επιλογή διαθέσιμου δωρεάν μοντέλου OpenRouter.</p></article></div></section>
-<section id="reports" class="view"><div id="empty" class="card empty"><span>▤</span><h2>Δεν υπάρχει ακόμη αναφορά</h2><p>Ξεκίνα μια σάρωση για να δεις την αξιολόγηση και τις προτάσεις.</p></div><div id="report" class="hidden"><div class="scoregrid"><div class="card score"><div id="scoreRing"><b id="scoreValue">—</b><small>/100</small></div><div><p>Security score</p><h2 id="targetName"></h2><small id="scanMeta"></small></div><button id="exportBtn">Εξαγωγή JSON</button></div><div class="card severity" id="severity"></div></div><div class="reportgrid"><div class="card"><div class="sectiontitle"><h2>Ευρήματα</h2><span id="findingTotal"></span></div><div id="findings"></div></div><aside class="card ai"><div class="sectiontitle"><h2>AI ανάλυση</h2><span id="modelBadge">OpenRouter</span></div><div id="aiText">Δεν χρησιμοποιήθηκε AI.</div></aside></div></div></section>
-<section id="settings" class="view"><div class="card settings"><h2>Ρυθμίσεις OpenRouter</h2><p>Το κλειδί αποθηκεύεται κρυπτογραφημένο από τα Windows και χρησιμοποιείται μόνο για κλήσεις προς το OpenRouter.</p><label>OpenRouter API key</label><input id="apiKey" type="password" placeholder="sk-or-v1-…"><small id="keyState"></small><label>Μέγιστες σελίδες (1–20)</label><input id="maxPages" type="number" min="1" max="20" value="10"><label class="check"><input id="useAI" type="checkbox" checked><span>Χρήση δωρεάν μοντέλου για ανάλυση της αναφοράς</span></label><button id="saveSettings">Αποθήκευση ρυθμίσεων</button><div id="saveMessage"></div></div><div class="card notice"><b>Σημαντικό</b><p>Η εφαρμογή κάνει παθητικούς, περιορισμένους ελέγχους. Δεν αντικαθιστά επαγγελματικό penetration test και δεν δοκιμάζει exploits.</p></div></section>
-</main><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Vexon Security Scanner</title><link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand"><div class="logo">V</div><div><b>VEXON</b><small>SECURITY SCANNER</small></div></div>
+  <nav aria-label="Κύρια πλοήγηση">
+    <button class="nav active" data-view="scanner" aria-label="Νέα σάρωση" aria-current="page">⌁ <span>Νέα σάρωση</span></button>
+    <button class="nav" data-view="reports" aria-label="Αποτελέσματα">▤ <span>Αποτελέσματα</span></button>
+    <button class="nav" data-view="settings" aria-label="Ρυθμίσεις">⚙ <span>Ρυθμίσεις</span></button>
+  </nav>
+  <div class="safe"><i aria-hidden="true">✓</i><div><b>Defensive Mode</b><small>Μόνο με εξουσιοδότηση</small></div></div>
+</aside>
+<main>
+  <header><div><p class="eyebrow">WEBSITE SECURITY</p><h1 id="pageTitle">Έλεγχος ασφαλείας</h1></div><div class="status" id="appStatus" role="status">Έτοιμο</div></header>
+  <div id="message" class="notice hidden" role="alert"></div>
+  <div id="progressCard" class="card progress hidden" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div><div><b id="progressText">Προετοιμασία…</b><small>Μπορείς να ακυρώσεις και να κρατήσεις όσα ευρήματα έχουν συλλεχθεί.</small></div>
+    <progress id="progressBar" value="0" max="100" aria-label="Πρόοδος εργασίας"></progress><button id="cancelBtn" class="secondary">Ακύρωση</button>
+  </div>
+  <section id="scanner" class="view active">
+    <div class="hero card"><div><span class="shield" aria-hidden="true">◈</span><h2>Έλεγξε την ιστοσελίδα σου</h2><p>Περιορισμένος έλεγχος TLS, headers, cookies και HTML. Καθαρά ευρήματα, συγκεκριμένες διορθώσεις και προαιρετική AI ανάλυση στα ελληνικά.</p></div>
+      <form id="scanForm"><label for="target">Διεύθυνση ιστοσελίδας</label><div class="urlrow"><input id="target" type="url" placeholder="https://example.gr" maxlength="4096" required><button id="scanBtn" type="submit">Έναρξη σάρωσης →</button></div><label class="check"><input id="authorized" type="checkbox" required><span>Μου ανήκει η ιστοσελίδα ή έχω γραπτή άδεια ελέγχου.</span></label><p class="hint">Δεν υποβάλλονται φόρμες και δεν εκτελούνται exploits. Άλλο hostname απαιτεί νέα σάρωση.</p></form>
+    </div>
+    <div class="features"><article><i>⌁</i><h3>TLS & HTTPS</h3><p>Έγκυρη ασφαλής σύνδεση, λήξη πιστοποιητικού και ανακατευθύνσεις.</p></article><article><i>☷</i><h3>Headers & Cookies</h3><p>Έλεγχοι ρυθμίσεων browser. Οι τιμές cookies δεν αποθηκεύονται.</p></article><article><i>✦</i><h3>Δωρεάν AI</h3><p>Προεπισκόπηση πριν την αποστολή και αυτόματο fallback μόνο σε μηδενικές τιμές.</p></article></div>
+  </section>
+  <section id="reports" class="view">
+    <div id="empty" class="card empty"><span>▤</span><h2>Δεν υπάρχει ακόμη αναφορά</h2><p>Ξεκίνα μια σάρωση για να δεις ευρήματα και προτάσεις.</p></div>
+    <div id="report" class="hidden">
+      <div class="scoregrid"><div class="card score"><div id="scoreRing"><b id="scoreValue">—</b><small>/100</small></div><div><p>Δείκτης ρυθμίσεων · <strong id="reportState"></strong></p><h2 id="targetName"></h2><small id="scanMeta"></small></div><button id="exportBtn">Εξαγωγή JSON</button></div><div class="card severity" id="severity"></div></div>
+      <p id="coverageNote" class="hint"></p>
+      <details class="card detail"><summary>Κάλυψη, TLS και περιορισμοί</summary><pre id="coverageDetails"></pre></details>
+      <div class="card notice hidden" id="scanIssues"><b>Σφάλματα και παραλείψεις</b><div id="errorList"></div></div>
+      <div class="reportgrid"><div class="card"><div class="sectiontitle"><h2>Ευρήματα</h2><span id="findingTotal"></span></div><label for="severityFilter">Φίλτρο σοβαρότητας</label><select id="severityFilter"><option value="all">Όλα</option><option value="high">Υψηλή / Κρίσιμη</option><option value="medium">Μεσαία</option><option value="low">Χαμηλή</option><option value="info">Πληροφοριακά</option></select><div id="findings"></div></div>
+        <aside class="card ai"><div class="sectiontitle"><h2>AI ανάλυση</h2><span id="modelBadge">OpenRouter</span></div><p id="aiText">Η αναφορά παραμένει τοπικά μέχρι να επιβεβαιώσεις αποστολή.</p><button id="previewAiBtn" class="primary">Προεπισκόπηση & ανάλυση</button><details><summary>Προσπάθειες μοντέλων</summary><pre id="aiAttempts">Δεν έγιναν κλήσεις.</pre></details></aside>
+      </div>
+    </div>
+  </section>
+  <section id="settings" class="view">
+    <form id="settingsForm" class="card settings"><h2>Ρυθμίσεις</h2><p>Το OpenRouter key αποθηκεύεται με κρυπτογράφηση του λειτουργικού. Κενό πεδίο διατηρεί το υπάρχον κλειδί.</p><label for="apiKey">OpenRouter API key</label><input id="apiKey" type="password" maxlength="512" autocomplete="off" placeholder="sk-or-v1-…"><small id="keyState"></small><label for="maxPages">Μέγιστες σελίδες (1–20)</label><input id="maxPages" type="number" min="1" max="20" step="1" value="10" required><div class="actions"><button id="saveSettings" type="submit">Αποθήκευση</button><button id="deleteKey" type="button" class="secondary">Διαγραφή κλειδιού</button></div><div id="saveMessage" role="status"></div></form>
+    <div class="card notice"><b>Τι σημαίνει η αξιολόγηση</b><p>Ο δείκτης αφορά συγκεκριμένες ρυθμίσεις των σελίδων που ελέγχθηκαν. Δεν αποδεικνύει ότι ένα site είναι ασφαλές και δεν αντικαθιστά έλεγχο κώδικα ή penetration test. Για ελλιπή σάρωση δεν εμφανίζεται score.</p></div>
+  </section>
+</main>
+<dialog id="aiDialog" aria-labelledby="aiDialogTitle">
+  <h2 id="aiDialogTitle">Δεδομένα προς OpenRouter</h2><p>Αυτή η αναφορά θα σταλεί στο OpenRouter και στον πάροχο του δωρεάν μοντέλου. Τιμές cookies και query parameters έχουν αφαιρεθεί. Έλεγξε ότι URLs και ευρήματα δεν περιέχουν εμπιστευτικές πληροφορίες.</p><pre id="aiPreview"></pre><label class="check"><input id="aiConsent" type="checkbox"><span>Επιτρέπω την αποστολή της παραπάνω αναφοράς για AI ανάλυση.</span></label><div class="actions"><button id="analyzeBtn" class="primary" disabled>Ανάλυση με δωρεάν AI</button><button id="closeAiDialog" class="secondary">Πίσω</button></div>
+</dialog>
+<script src="app.js"></script>
+</body></html>
+

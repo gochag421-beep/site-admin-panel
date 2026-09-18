@@ -1,1 +1,52 @@
-{"name":"vexon-security-scanner","version":"1.0.0","description":"Defensive website security scanner with OpenRouter-assisted reporting","main":"electron/main.js","author":"Vexon","license":"MIT","scripts":{"start":"electron .","dev":"electron .","test":"node --test","build:win":"electron-builder --win nsis --publish never"},"devDependencies":{"electron":"^38.0.0","electron-builder":"^26.0.12"},"dependencies":{"cheerio":"^1.1.2"},"build":{"appId":"gr.vexon.securityscanner","productName":"Vexon Security Scanner","asar":true,"files":["electron/**/*","src/**/*","renderer/**/*","package.json"],"win":{"target":["nsis"],"artifactName":"Vexon-Security-Scanner-Setup-${version}-${arch}.${ext}"},"nsis":{"oneClick":false,"allowToChangeInstallationDirectory":true,"createDesktopShortcut":true,"createStartMenuShortcut":true}}}
+{
+  "name": "vexon-security-scanner",
+  "version": "1.1.0",
+  "description": "Defensive website security scanner with OpenRouter-assisted reporting",
+  "main": "electron/main.js",
+  "author": "Vexon",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "test": "node --test test/*.test.js",
+    "build:win": "electron-builder --win --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.4.2",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "ipaddr.js": "^2.5.0"
+  },
+  "build": {
+    "appId": "gr.vexon.securityscanner",
+    "productName": "Vexon Security Scanner",
+    "asar": true,
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "Vexon-Security-Scanner-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Vexon-Security-Scanner-Portable-${version}-${arch}.${ext}"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
