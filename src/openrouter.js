@@ -20,8 +20,13 @@ async function selectFreeModel(apiKey) {
   return null;
 }
 async function analyzeWithOpenRouter(apiKey, ignoredModel, report, options = {}) {
+  const signal = options.signal;
   const fetchImpl = options.fetchImpl || fetch;
-  const sleep = options.sleep || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  const sleep = options.sleep || (ms => new Promise((resolve,reject) => {
+    const abort=()=>{clearTimeout(timer);reject(new Error('Η AI ανάλυση ακυρώθηκε.'));};
+    const timer=setTimeout(()=>{signal?.removeEventListener('abort',abort);resolve();},ms);
+    signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
+  }));
   const progress = options.progress || (() => {});
   const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
   const { response, json } = await request(`${API}/models`, { headers }, fetchImpl);
@@ -37,6 +42,7 @@ async function analyzeWithOpenRouter(apiKey, ignoredModel, report, options = {})
   const attempts = [];
   // One bounded pass through every verified free model. Never use paid fallbacks.
   for (const model of models) {
+    if (signal?.aborted) throw new Error('Η AI ανάλυση ακυρώθηκε.');
     if (attempts.length) await sleep(3200);
     progress({stage:'ai',percent:88,message:`Δωρεάν AI ${attempts.length + 1}/${models.length}: ${model.id}`});
     try {
@@ -71,6 +77,7 @@ async function analyzeWithOpenRouter(apiKey, ignoredModel, report, options = {})
       if (typeof choice?.message?.content !== 'string' || !choice.message.content.trim() || choice.finish_reason === 'length') continue;
       return {text:choice.message.content, model:data.model || model.id, requestedModel:model.id, attempts};
     } catch (error) {
+      if (signal?.aborted) throw new Error('Η AI ανάλυση ακυρώθηκε.');
       if (error.fatal) throw error;
       if (attempts.at(-1)?.model !== model.id) attempts.push({model:model.id,status:'network-or-timeout'});
     }

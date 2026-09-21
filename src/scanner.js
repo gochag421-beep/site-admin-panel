@@ -1,83 +1,67 @@
-const tls = require('node:tls');
-const dns = require('node:dns').promises;
-const net = require('node:net');
-const cheerio = require('cheerio');
-
-const severityWeight = { critical: 10, high: 7, medium: 4, low: 1, info: 0 };
-const privateV4 = ip => /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
-const privateV6 = ip => ip === '::1' || /^f[cd]/i.test(ip) || /^fe80:/i.test(ip);
-
-async function validatePublicUrl(input) {
-  let url;
-  try { url = new URL(input); } catch { throw new Error('Enter a valid full URL, for example https://example.com'); }
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only HTTP and HTTPS websites are supported.');
-  if (url.username || url.password) throw new Error('URLs containing credentials are not allowed.');
-  if (url.port && !['80','443'].includes(url.port)) throw new Error('Only standard web ports 80 and 443 are allowed.');
-  const addresses = await dns.lookup(url.hostname, { all: true });
-  if (!addresses.length || addresses.some(x => (net.isIPv4(x.address) ? privateV4(x.address) : privateV6(x.address)))) throw new Error('Local, private, and link-local targets are blocked.');
-  return url;
-}
-
-function finding(severity, title, evidence, recommendation, url) { return { id: `${title}-${url}`.replace(/\W+/g,'-').toLowerCase(), severity, title, evidence, recommendation, url }; }
-async function get(url, method='GET') {
-  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 12000);
-  try { return await fetch(url, { method, redirect: 'manual', signal: controller.signal, headers: { 'User-Agent': 'VexonSecurityScanner/1.0 (authorized defensive audit)', Accept: 'text/html,application/xhtml+xml' } }); }
-  finally { clearTimeout(timer); }
-}
-
-async function tlsInfo(url) {
-  if (url.protocol !== 'https:') return null;
-  return new Promise((resolve) => {
-    const socket = tls.connect({ host: url.hostname, port: 443, servername: url.hostname, rejectUnauthorized: false, timeout: 8000 }, () => { const cert = socket.getPeerCertificate(); resolve({ authorized: socket.authorized, authorizationError: socket.authorizationError || null, protocol: socket.getProtocol(), validFrom: cert.valid_from, validTo: cert.valid_to, issuer: cert.issuer?.O || cert.issuer?.CN || 'Unknown' }); socket.end(); });
-    socket.on('error', e => resolve({ error: e.message })); socket.on('timeout', () => { socket.destroy(); resolve({ error: 'TLS timeout' }); });
+const cheerio=require('cheerio');
+const {validatePublicUrl,getPage,inspectTLS}=require('./network');
+const {finding,summarize}=require('./findings');
+const {safeUrl,safeText}=require('./privacy');
+const headerRules=[['content-security-policy','csp','Content Security Policy απουσιάζει','medium','Πρόσθεσε CSP αφού τη δοκιμάσεις σε report-only mode.'],['strict-transport-security','hsts','HSTS απουσιάζει','medium','Ενεργοποίησε Strict-Transport-Security αφού επιβεβαιώσεις το HTTPS.'],['x-content-type-options','nosniff','Προστασία MIME sniffing απουσιάζει','low','Όρισε X-Content-Type-Options: nosniff.'],['referrer-policy','referrer','Referrer Policy απουσιάζει','low','Όρισε Referrer-Policy: strict-origin-when-cross-origin.'],['permissions-policy','permissions','Permissions Policy απουσιάζει','low','Απενεργοποίησε browser capabilities που δεν χρειάζονται.']];
+const pageChecks=['csp','hsts','nosniff','referrer','permissions','frame','cookie-secure','cookie-httponly','cookie-samesite','mixed','sri','form-http','cors','server'];
+function inspectPage(url,response,report) {
+  const h=response.headers;const html=/text\/html|application\/xhtml/i.test(h['content-type']||'');
+  const scope=`http:${safeUrl(url)}`;const add=(id,opts)=>report.findings.push(finding(id,{url,scope,...opts}));
+  if(!html) return [];
+  for(const id of pageChecks)report.coverage.push(`${scope}|${id}`);
+  for(const [name,id,title,severity,recommendation] of headerRules) {
+    if(id==='hsts'&&!url.startsWith('https:'))continue;
+    if(!h[name])add(id,{title,severity,evidence:`HTTP ${response.status}; ${name}: δεν βρέθηκε`,recommendation});
+  }
+  if(!h['x-frame-options']&&!/frame-ancestors/i.test(h['content-security-policy']||''))add('frame',{title:'Δεν δηλώνεται προστασία framing',severity:'medium',evidence:'Απουσιάζουν X-Frame-Options και CSP frame-ancestors.',recommendation:'Όρισε frame-ancestors στη CSP ανάλογα με την επιθυμητή ενσωμάτωση.'});
+  if(h.server)add('server',{title:'Δημοσιοποίηση λογισμικού server',severity:'info',evidence:`Server: ${safeText(h.server)}`,recommendation:'Αφαίρεσε μη απαραίτητα στοιχεία έκδοσης.'});
+  if(h['access-control-allow-origin']==='*'&&h['access-control-allow-credentials']==='true')add('cors',{title:'Ασυμβίβαστη ρύθμιση CORS',severity:'low',kind:'observed',evidence:'Allow-Origin: * με Allow-Credentials: true. Οι browsers απορρίπτουν αυτόν τον συνδυασμό για credentialed requests.',recommendation:'Χρησιμοποίησε ρητή λίστα επιτρεπόμενων origins. Αυτό δεν αποδεικνύει διαρροή δεδομένων.'});
+  const cookies=h['set-cookie']||[];
+  for(const cookie of (Array.isArray(cookies)?cookies:[cookies])) {
+    const name=cookie.split('=',1)[0].slice(0,100);const evidence=`Cookie ${name}: [VALUE REDACTED]`;
+    for(const [id,pattern,title,rec] of [['cookie-secure',/;\s*secure(?:;|$)/i,'Cookie χωρίς Secure','Πρόσθεσε Secure στα cookies που μεταδίδονται με HTTPS.'],['cookie-httponly',/;\s*httponly(?:;|$)/i,'Cookie χωρίς HttpOnly','Επιβεβαίωσε τον σκοπό του cookie και πρόσθεσε HttpOnly στα session cookies.'],['cookie-samesite',/;\s*samesite=/i,'Cookie χωρίς ρητό SameSite','Όρισε SameSite=Lax ή Strict όταν είναι συμβατό με τη λειτουργία.']]) {
+      if(id==='cookie-secure'&&!url.startsWith('https:'))continue;
+      if(!pattern.test(cookie))add(id,{title,subject:name,evidence,recommendation:rec,severity:id==='cookie-secure'?'medium':'low'});
+    }
+  }
+  const $=cheerio.load(response.body);
+  $('form').each((_,el)=>{try{const action=new URL($(el).attr('action')||url,url);if(action.protocol==='http:'&&url.startsWith('https:'))add('form-http',{title:'Φόρμα υποβάλλεται μέσω HTTP',severity:'high',kind:'observed',subject:safeUrl(action.href),evidence:safeUrl(action.href),recommendation:'Χρησιμοποίησε HTTPS για την υποβολή της φόρμας.'});}catch{}});
+  $('script[src],img[src],iframe[src],link[rel="stylesheet"][href],video[src],audio[src]').each((_,el)=>{
+    try{const asset=new URL($(el).attr('src')||$(el).attr('href'),url);if(asset.protocol==='http:'&&url.startsWith('https:'))add('mixed',{title:'Πόρος με μη κρυπτογραφημένο URL',severity:'medium',kind:'observed',subject:safeUrl(asset.href),evidence:safeUrl(asset.href),recommendation:'Αντικατάστησε τον πόρο με HTTPS. Ο browser μπορεί να τον μπλοκάρει ή να τον αναβαθμίζει.'});
+      if(['script','link'].includes(el.tagName)&&asset.origin!==new URL(url).origin&&!$(el).attr('integrity'))add('sri',{title:'Εξωτερικός πόρος χωρίς SRI',severity:'low',subject:safeUrl(asset.href),evidence:safeUrl(asset.href),recommendation:'Εξέτασε Subresource Integrity για σταθερές εκδόσεις εξωτερικών scripts/styles.'});}catch{}
   });
-}
-
-function inspectPage(url, response, html, findings) {
-  const h = response.headers;
-  const required = [
-    ['content-security-policy','Content Security Policy is missing','A CSP reduces the impact of script injection attacks.','Add a restrictive Content-Security-Policy and test it in report-only mode first.','medium'],
-    ['strict-transport-security','HSTS is missing','HTTPS responses do not advertise Strict Transport Security.','Add Strict-Transport-Security with an appropriate max-age after confirming HTTPS works on all subdomains.','medium'],
-    ['x-content-type-options','MIME sniffing protection is missing','X-Content-Type-Options is absent.','Set X-Content-Type-Options: nosniff.','low'],
-    ['referrer-policy','Referrer Policy is missing','Referrer-Policy is absent.','Set a privacy-preserving Referrer-Policy such as strict-origin-when-cross-origin.','low'],
-    ['permissions-policy','Permissions Policy is missing','Permissions-Policy is absent.','Disable browser capabilities the site does not need.','low']
-  ];
-  for (const [name,title,evidence,rec,severity] of required) if (!h.get(name)) findings.push(finding(severity,title,evidence,rec,url));
-  if (h.get('server')) findings.push(finding('info','Server software is disclosed',`Server: ${h.get('server')}`,'Remove unnecessary version and server disclosure where practical.',url));
-  if (url.startsWith('https:') && h.get('access-control-allow-origin') === '*' && h.get('access-control-allow-credentials') === 'true') findings.push(finding('high','Unsafe CORS policy','Wildcard origin is combined with credentials.','Use an explicit allowlist and never combine credentials with a wildcard origin.',url));
-  const cookies = h.getSetCookie ? h.getSetCookie() : (h.get('set-cookie') ? [h.get('set-cookie')] : []);
-  cookies.forEach(c => { if (!/;\s*secure/i.test(c) && url.startsWith('https:')) findings.push(finding('medium','Cookie lacks Secure flag',c.split(';')[0],'Mark sensitive cookies Secure.',url)); if (!/;\s*httponly/i.test(c)) findings.push(finding('low','Cookie lacks HttpOnly flag',c.split(';')[0],'Mark session cookies HttpOnly.',url)); if (!/;\s*samesite=/i.test(c)) findings.push(finding('low','Cookie lacks SameSite attribute',c.split(';')[0],'Set SameSite=Lax or Strict unless cross-site use is required.',url)); });
-  if (!/text\/html/i.test(h.get('content-type') || '')) return [];
-  const $ = cheerio.load(html);
-  $('form').each((_, el) => { const action = new URL($(el).attr('action') || url, url); if (url.startsWith('https:') && action.protocol === 'http:') findings.push(finding('high','Form submits over HTTP',action.href,'Submit sensitive forms only over HTTPS.',url)); });
-  $('[src],[href]').each((_, el) => { const raw = $(el).attr('src') || $(el).attr('href'); if (raw?.startsWith('http:') && url.startsWith('https:')) findings.push(finding('medium','Mixed active/passive content',raw,'Load all page resources over HTTPS.',url)); });
-  $('script[src^="http"],link[rel="stylesheet"][href^="http"]').each((_, el) => { if (!$(el).attr('integrity')) findings.push(finding('low','Third-party asset without SRI',$(el).attr('src') || $(el).attr('href'),'Consider Subresource Integrity for versioned third-party assets.',url)); });
-  const links = []; $('a[href]').each((_, el) => { try { const u = new URL($(el).attr('href'), url); if (u.origin === new URL(url).origin && ['http:','https:'].includes(u.protocol)) { u.hash=''; links.push(u.href); } } catch {} });
+  const links=[];$('a[href]').each((_,el)=>{try{const u=new URL($(el).attr('href'),url);u.hash='';if(u.origin===new URL(url).origin&&!u.search&&!/logout|delete|remove|unsubscribe|signout/i.test(u.pathname))links.push(u.href);}catch{}});
   return [...new Set(links)];
 }
-
-async function runScan(input, { maxPages=10, progress=()=>{} }={}) {
-  const started = new Date().toISOString(); const root = await validatePublicUrl(input); const findings=[]; const visited=[]; const errors=[];
-  progress({ stage:'connect', message:'Validating target and TLS…', percent:5 });
-  const tls = await tlsInfo(root); if (root.protocol === 'http:') findings.push(finding('high','Website uses HTTP','Traffic is not encrypted.','Redirect all traffic to HTTPS and deploy a valid certificate.',root.href));
-  if (tls?.error || tls?.authorized === false) findings.push(finding('high','TLS certificate problem',tls?.error || tls?.authorizationError || 'Certificate is not trusted.','Install a valid certificate with the complete chain.',root.href));
-  if (tls?.validTo && (new Date(tls.validTo)-Date.now()) < 30*86400000) findings.push(finding('medium','TLS certificate expires soon',`Expires: ${tls.validTo}`,'Renew the certificate and automate renewal.',root.href));
-  const queue=[root.href]; const cap=Math.min(20,Math.max(1,Number(maxPages)||10));
-  while(queue.length && visited.length<cap) {
-    const current=queue.shift(); if(visited.includes(current)) continue;
-    progress({ stage:'crawl', message:`Checking page ${visited.length+1}/${cap}`, percent:10+Math.round((visited.length/cap)*65) });
+async function runScan(input,{maxPages=10,progress=()=>{},signal,request=getPage,tlsRequest=inspectTLS,validate=validatePublicUrl}={}) {
+  const report={schemaVersion:2,target:safeUrl(input),startedAt:new Date().toISOString(),pagesScanned:[],attempted:[],coverage:[],findings:[],errors:[],modules:{http:'pending',browser:'disabled',source:'disabled'},methodology:'Περιορισμένος HTTP/TLS έλεγχος. Τα ευρήματα είναι παρατηρήσεις και συστάσεις, όχι πλήρες penetration test.'};
+  let root;try{root=await validate(input);}catch(e){report.errors.push({module:'http',error:safeText(e.message)});report.modules.http='failed';return summarize(report);}
+  const tlsScope=`tls:${root.origin}`;report.tls=await tlsRequest(root.href,{signal});
+  if(report.tls&&!report.tls.error){report.coverage.push(`${tlsScope}|tls-trust`,`${tlsScope}|tls-expiry`);
+    if(!report.tls.authorized)report.findings.push(finding('tls-trust',{module:'tls',scope:tlsScope,url:root.origin,severity:'high',kind:'observed',title:'Πρόβλημα πιστοποιητικού TLS',evidence:report.tls.authorizationError,recommendation:'Έλεγξε όνομα host, εγκυρότητα και αλυσίδα πιστοποιητικού.'}));
+    if(report.tls.validTo&&(new Date(report.tls.validTo)-Date.now())<30*86400000)report.findings.push(finding('tls-expiry',{module:'tls',scope:tlsScope,url:root.origin,severity:'medium',kind:'observed',title:'Το πιστοποιητικό λήγει σύντομα ή έχει λήξει',evidence:report.tls.validTo,recommendation:'Ανανέωσε το πιστοποιητικό και ενεργοποίησε αυτόματη ανανέωση.'}));
+  }else if(report.tls?.error)report.errors.push({module:'tls',error:report.tls.error});
+  const queue=[root.href];const seen=new Set();const cap=Math.min(20,Math.max(1,Number(maxPages)||10));
+  while(queue.length&&seen.size<cap&&!signal?.aborted){
+    const url=queue.shift();if(seen.has(url))continue;seen.add(url);report.attempted.push(safeUrl(url));
+    progress({stage:'http',percent:5+Math.round(seen.size/cap*40),message:`HTTP: ${seen.size}/${cap}`});
     try {
-      const response=await get(current); visited.push(current);
-      if ([301,302,303,307,308].includes(response.status)) { const loc=response.headers.get('location'); if(loc){ const next=new URL(loc,current); if(next.origin===root.origin) queue.push(next.href); if(root.protocol==='https:'&&next.protocol==='http:') findings.push(finding('high','HTTPS redirects to HTTP',next.href,'Keep redirects on HTTPS.',current)); } continue; }
-      const html=(await response.text()).slice(0,2_000_000); const links=inspectPage(current,response,html,findings); for(const link of links) if(!visited.includes(link)&&!queue.includes(link)) queue.push(link);
-      if(response.status>=400) findings.push(finding('info',`Page returned HTTP ${response.status}`,current,'Review broken or protected routes as appropriate.',current));
-    } catch(e) { errors.push({url:current,error:e.message}); }
+      if(seen.size>1)await new Promise(r=>setTimeout(r,300));
+      const response=await request(url,{signal});
+      if([301,302,303,307,308].includes(response.status)){
+        const next=new URL(response.headers.location,url);next.hash='';
+        if(next.origin===root.origin||(next.hostname===root.hostname&&new URL(url).protocol==='http:'&&next.protocol==='https:'))queue.push(next.href);
+        else report.errors.push({module:'http',url:safeUrl(url),error:'Redirect εκτός επιτρεπόμενου origin δεν ακολουθήθηκε.'});
+        continue;
+      }
+      if(response.status<200||response.status>=300){report.errors.push({module:'http',url:safeUrl(url),error:`HTTP ${response.status}`});continue;}
+      report.pagesScanned.push(safeUrl(url));
+      if(url.startsWith('http:'))report.findings.push(finding('http-plaintext',{url,severity:'high',kind:'observed',title:'Σελίδα εξυπηρετείται με HTTP',evidence:`HTTP ${response.status}`,recommendation:'Ενεργοποίησε HTTPS και ανακατεύθυνση HTTP σε HTTPS.'}));
+      report.coverage.push(`http:${safeUrl(url)}|http-plaintext`);
+      const links=inspectPage(url,response,report);for(const link of links)if(!seen.has(link)&&!queue.includes(link)&&queue.length<100)queue.push(link);
+    }catch(e){report.errors.push({module:'http',url:safeUrl(url),error:safeText(e.message)});}
   }
-  progress({ stage:'summarize', message:'Prioritizing findings…', percent:78 });
-  const unique=[...new Map(findings.map(x=>[`${x.title}|${x.url}|${x.evidence}`,x])).values()].sort((a,b)=>severityWeight[b.severity]-severityWeight[a.severity]);
-  const counts={critical:0,high:0,medium:0,low:0,info:0}; unique.forEach(x=>counts[x.severity]++);
-  const score=Math.max(0,100-unique.reduce((n,x)=>n+severityWeight[x.severity],0));
-  return { schemaVersion:1, target:root.href, startedAt:started, completedAt:new Date().toISOString(), authorizationConfirmed:true, methodology:'Passive, same-origin, rate-limited HTTP/TLS configuration review. No exploit payloads or authentication bypass attempts.', pagesScanned:visited, tls, errors, summary:{score,counts,total:unique.length}, findings:unique };
+  if(!report.pagesScanned.length&&!report.errors.length)report.errors.push({module:'http',error:'Δεν ελέγχθηκε επιτυχώς καμία σελίδα (redirect loop ή όριο).'});
+  report.cancelled=Boolean(signal?.aborted);report.modules.http=report.errors.some(e=>['http','tls'].includes(e.module))?'partial':'complete';report.completedAt=new Date().toISOString();return summarize(report);
 }
-
-module.exports={ runScan, validatePublicUrl };
+module.exports={runScan,validatePublicUrl,inspectPage};

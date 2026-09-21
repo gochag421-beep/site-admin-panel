@@ -1,9 +1,14 @@
-const { contextBridge, ipcRenderer } = require('electron');
-
-contextBridge.exposeInMainWorld('vexon', {
-  getSettings: () => ipcRenderer.invoke('settings:get'),
-  saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
-  scan: (options) => ipcRenderer.invoke('scan:run', options),
-  exportReport: (report) => ipcRenderer.invoke('report:export', report),
-  onProgress: (callback) => ipcRenderer.on('scan:progress', (_, data) => callback(data))
+const {contextBridge,ipcRenderer}=require('electron');
+contextBridge.exposeInMainWorld('vexon',{
+  workspace:()=>ipcRenderer.invoke('workspace:get'),
+  saveProject:p=>ipcRenderer.invoke('project:save',p),
+  scan:id=>ipcRenderer.invoke('scan:run',id),
+  cancel:()=>ipcRenderer.invoke('scan:cancel'),
+  report:id=>ipcRenderer.invoke('report:get',id),
+  status:(id,fid,status)=>ipcRenderer.invoke('finding:status',id,fid,status),
+  saveSettings:s=>ipcRenderer.invoke('settings:save',s),
+  pickLogo:()=>ipcRenderer.invoke('brand:logo'),
+  exportReport:(id,format)=>ipcRenderer.invoke('report:export',id,format),
+  onProgress:fn=>ipcRenderer.on('scan:progress',(_,data)=>fn(data)),
+  onFinished:fn=>ipcRenderer.on('scan:finished',(_,data)=>fn(data))
 });
