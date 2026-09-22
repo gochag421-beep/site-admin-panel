@@ -17,7 +17,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # npm install preserves a valid lockfile when npm's cache/check-out state is stale.
+      - run: npm install --ignore-scripts
       - run: npm test
       - run: npm run test:desktop
       - uses: actions/upload-artifact@v4
