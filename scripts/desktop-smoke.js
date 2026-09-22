@@ -8,6 +8,9 @@ app.whenReady().then(async()=>{
   try{
     assert.ok(win);const run=code=>win.webContents.executeJavaScript(code,true);
     await run('window.vexon.workspace()');
+    assert.equal(await run("typeof window.vexon.backupExport"),'function');
+    assert.equal(await run("Boolean(document.querySelector('#backupSave'))"),true);
+    assert.equal(await run("Boolean(document.querySelector('[name=cveWatch]'))"),true);
     const project=await run(`window.vexon.saveProject({name:'Desktop QA',client:'Test client',url:'http://127.0.0.1',authorized:true,browser:false,useAI:false,schedule:'off'})`);
     const report=await run(`window.vexon.scan(${JSON.stringify(project.id)})`);assert.equal(report.status,'failed');assert.equal(report.summary.score,null);
     const state=await run('window.vexon.workspace()');assert.equal(state.history.length,1);

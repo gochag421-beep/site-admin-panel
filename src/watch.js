@@ -1,0 +1,5 @@
+async function checkInventory(inventory,{fetchImpl=fetch,signal}={}){
+ const items=inventory.slice(0,300),matches=[];for(let i=0;i<items.length;i+=50){const batch=items.slice(i,i+50);const res=await fetchImpl('https://api.osv.dev/v1/querybatch',{method:'POST',headers:{'Content-Type':'application/json'},redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(20000)]):AbortSignal.timeout(20000),body:JSON.stringify({queries:batch.map(p=>({package:{name:p.name,ecosystem:p.ecosystem||'npm'},version:p.version}))})});if(!res.ok)throw new Error('OSV HTTP '+res.status);const data=await res.json();if(data.results?.length!==batch.length||data.results.some(r=>r.next_page_token))throw new Error('Ελλιπή αποτελέσματα OSV.');data.results.forEach((r,n)=>{for(const v of r.vulns||[])matches.push({...batch[n],advisory:v.id});});}return {checkedAt:new Date().toISOString(),matches,checked:items.length};
+}
+function newMatches(previous,current){const key=v=>[v.ecosystem,v.name,v.version,v.advisory].join('|');const old=new Set((previous?.matches||[]).map(key));return current.matches.filter(x=>!old.has(key(x)));}
+module.exports={checkInventory,newMatches};

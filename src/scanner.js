@@ -25,6 +25,7 @@ function inspectPage(url,response,report) {
     }
   }
   const $=cheerio.load(response.body);
+  report.wordpress=[...new Map([...(report.wordpress||[]),...require('./advanced').wordpressInventory($,url)].map(x=>[x.type+':'+x.slug,x])).values()];
   report.technologies||=[];
   const hints=[String(h.server||''),String(h['x-powered-by']||''),$('meta[name="generator"]').attr('content')||''];
   for(const hint of hints){for(const name of ['WordPress','Drupal','Joomla','nginx','Apache','PHP']){

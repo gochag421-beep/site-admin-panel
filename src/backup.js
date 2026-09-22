@@ -1,0 +1,16 @@
+const crypto=require('node:crypto');const fs=require('node:fs');const path=require('node:path');const {atomic}=require('./store');
+const uuid=/^[a-f0-9-]{36}$/;
+function pack(store,password,profile={}){if(typeof password!=='string'||password.length<12)throw new Error('Χρησιμοποίησε κωδικό τουλάχιστον 12 χαρακτήρων.');const salt=crypto.randomBytes(16),iv=crypto.randomBytes(12),key=crypto.scryptSync(password,salt,32);const cipher=crypto.createCipheriv('aes-256-gcm',key,iv);const data={version:1,workspace:store.data,reports:store.history().map(r=>store.report(r.id)),profile:{company:profile.company,contact:profile.contact,logo:profile.logo,notifications:profile.notifications}};const payload=Buffer.concat([cipher.update(JSON.stringify(data),'utf8'),cipher.final()]);return JSON.stringify({format:'vexon-backup-1',salt:salt.toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),payload:payload.toString('base64')});}
+function unpack(text,password){if(Buffer.byteLength(text)>100_000_000)throw new Error('Το backup υπερβαίνει τα 100 MB.');const e=JSON.parse(text);if(e.format!=='vexon-backup-1')throw new Error('Μη υποστηριζόμενο backup.');const salt=Buffer.from(e.salt,'base64'),iv=Buffer.from(e.iv,'base64'),tag=Buffer.from(e.tag,'base64');if(salt.length!==16||iv.length!==12||tag.length!==16)throw new Error('Μη έγκυρο backup.');const decipher=crypto.createDecipheriv('aes-256-gcm',crypto.scryptSync(password,salt,32),iv);decipher.setAuthTag(tag);const d=JSON.parse(Buffer.concat([decipher.update(Buffer.from(e.payload,'base64')),decipher.final()]).toString());
+ if(d.version!==1||!Array.isArray(d.workspace?.projects)||!Array.isArray(d.workspace?.reports)||!Array.isArray(d.reports))throw new Error('Μη έγκυρη δομή.');
+ const projects=new Set();for(const p of d.workspace.projects){if(!uuid.test(p.id)||projects.has(p.id))throw new Error('Μη έγκυρο έργο.');projects.add(p.id);const u=new URL(p.url);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw new Error('Μη έγκυρο URL.');}
+ const ids=new Set();for(const r of d.reports){if(!uuid.test(r.id)||ids.has(r.id)||!projects.has(r.projectId)||!Array.isArray(r.findings)||!Array.isArray(r.errors)||!Array.isArray(r.pagesScanned)||!r.summary)throw new Error('Μη έγκυρη αναφορά.');ids.add(r.id);}
+ for(const r of d.workspace.reports)if(!ids.has(r.id)||!projects.has(r.projectId))throw new Error('Λείπει αναφορά.');return d;
+}
+function merge(store,data){const existing=new Set(store.data.projects.map(p=>p.id));if(data.workspace.projects.some(p=>existing.has(p.id)))throw new Error('Υπάρχουν έργα με ίδιο ID. Η εισαγωγή δεν αντικαθιστά υπάρχοντα δεδομένα.');
+ for(const r of data.reports){const file=path.join(store.dir,'reports',r.id+'.json');if(fs.existsSync(file))throw new Error('Υπάρχει ήδη αναφορά με ίδιο ID.');}
+ for(const r of data.reports)atomic(path.join(store.dir,'reports',r.id+'.json'),r);
+ store.data.projects.push(...data.workspace.projects.map(p=>({...p,authorized:false,schedule:'off',nextRun:null,cveWatch:false})));
+ store.data.reports.push(...data.workspace.reports);store.data.chats={...store.data.chats,...data.workspace.chats};store.data.research={...store.data.research,...data.workspace.research};store.commit();return data.workspace.projects.length;
+}
+module.exports={pack,unpack,merge};

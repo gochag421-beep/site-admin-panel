@@ -19,10 +19,10 @@ async function resolvePublic(input) {
 }
 async function validatePublicUrl(input){return (await resolvePublic(input)).url;}
 function pinnedLookup(address,family){return (_hostname,opts,cb)=> typeof opts==='object' && opts.all ? cb(null,[{address,family}]) : cb(null,address,family);}
-async function getPage(input,{signal,maxBytes=2_000_000}={}) {
+async function getPage(input,{signal,maxBytes=2_000_000,cookie=''}={}) {
   const {url,address,family}=await resolvePublic(input);
   return new Promise((resolve,reject)=>{
-    const req=(url.protocol==='https:'?https:http).request(url,{method:'GET',lookup:pinnedLookup(address,family),agent:false,signal,headers:{'User-Agent':'VexonSecurityScanner/2.0 (authorized audit)',Accept:'text/html,application/xhtml+xml'}},res=>{
+    const req=(url.protocol==='https:'?https:http).request(url,{method:'GET',lookup:pinnedLookup(address,family),agent:false,signal,headers:{'User-Agent':'VexonSecurityScanner/4.0 (authorized audit)',Accept:'text/html,application/xhtml+xml',...(cookie?{Cookie:cookie}:{})}},res=>{
       let length=0; const chunks=[];
       res.on('data',chunk=>{length+=chunk.length;if(length>maxBytes)req.destroy(new Error('Page exceeds 2 MB limit'));else chunks.push(chunk);});
       res.on('error',reject);

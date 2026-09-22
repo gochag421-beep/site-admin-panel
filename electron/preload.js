@@ -1,5 +1,12 @@
 const {contextBridge,ipcRenderer}=require('electron');
 contextBridge.exposeInMainWorld('vexon',{
+  session:(id,cookie)=>ipcRenderer.invoke('session:set',id,cookie),
+  backupExport:password=>ipcRenderer.invoke('backup:export',password),
+  backupImport:password=>ipcRenderer.invoke('backup:import',password),
+  remediation:id=>ipcRenderer.invoke('remediation:export',id),
+  watch:id=>ipcRenderer.invoke('watch:run',id),
+  watchState:id=>ipcRenderer.invoke('watch:get',id),
+  updates:()=>ipcRenderer.invoke('update:check'),
   chat:id=>ipcRenderer.invoke('chat:get',id),
   sendChat:(id,text)=>ipcRenderer.invoke('chat:send',id,text),
   openSource:url=>ipcRenderer.invoke('source:open',url),

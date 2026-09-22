@@ -21,8 +21,8 @@ async function scanSource(repository,report,{token,signal,progress=()=>{},fetchI
     const meta=await get('');const commit=await get(`commits/${encodeURIComponent(meta.default_branch)}`);const ref=commit.sha;report.source.commit=ref;
     const tree=await get(`git/trees/${ref}?recursive=1`);
     if(tree.truncated)report.source.limitations.push('Το GitHub επέστρεψε περικομμένο tree.');
-    const eligible=tree.tree.filter(f=>f.type==='blob'&&!/(^|\/)(node_modules|vendor|dist|build|\.git)\//.test(f.path)&&(/\.(js|jsx|ts|tsx|py|php|json|ya?ml|env|pem|key|conf)$/i.test(f.path)||/\/?.env(?:\.|$)/.test(f.path)));
-    const priority=f=>f.path.endsWith('package-lock.json')?0:/env|pem|key|config/i.test(f.path)?1:2;
+    const eligible=tree.tree.filter(f=>f.type==='blob'&&!/(^|\/)(node_modules|vendor|dist|build|\.git)\//.test(f.path)&&(/\.(js|jsx|ts|tsx|py|php|json|ya?ml|env|pem|key|conf)$/i.test(f.path)||/\/?.env(?:\.|$)/.test(f.path)||/composer.lock$|requirements.txt$/.test(f.path)));
+    const priority=f=>/package-lock.json$|composer.lock$|requirements.txt$/.test(f.path)?0:/env|pem|key|config/i.test(f.path)?1:2;
     eligible.sort((a,b)=>priority(a)-priority(b)||a.path.localeCompare(b.path));
     const candidates=eligible.filter(f=>f.size<=2_000_000).slice(0,60);
     if(candidates.length<eligible.length)report.source.limitations.push(`Ελέγχθηκαν έως 60 αρχεία ≤2 MB από ${eligible.length} υποψήφια.`);
@@ -32,22 +32,24 @@ async function scanSource(repository,report,{token,signal,progress=()=>{},fetchI
       const text=Buffer.from(blob.content,'base64').toString('utf8');const url=`https://github.com/${repo}/blob/${meta.default_branch}/${file.path}`;
       inspectSource(text,file.path,url,report);report.source.filesChecked++;
       if(file.path.endsWith('package-lock.json')){try{dependencies.push(...packagesFromLock(JSON.parse(text)));}catch{report.source.limitations.push('Μη έγκυρο package-lock.json.');}}
+      try{dependencies.push(...require('./advanced').dependencies(file.path,text));}catch{report.source.limitations.push('Μη έγκυρο lockfile: '+file.path);}
     }
-    dependencies=[...new Map(dependencies.map(p=>[p.name+'@'+p.version,p])).values()];
+    dependencies=[...new Map(dependencies.map(p=>[(p.ecosystem||'npm')+':'+p.name+'@'+p.version,{...p,ecosystem:p.ecosystem||'npm'}])).values()];
     if(dependencies.length>300)report.source.limitations.push('Έλεγχος OSV περιορίστηκε στα πρώτα 300 πακέτα.');
-    if(!dependencies.length)report.source.limitations.push('Δεν βρέθηκαν ακριβείς npm εκδόσεις σε package-lock.json. Άλλα οικοσυστήματα δεν καλύπτονται.');
+    if(!dependencies.length)report.source.limitations.push('Δεν βρέθηκαν ακριβείς εκδόσεις σε package-lock.json, composer.lock ή requirements.txt.');
     const packages=dependencies.slice(0,300);const scope=`dependencies:${repo}`;
+    report.inventory=packages;
     for(let start=0;start<packages.length;start+=50){const chunk=packages.slice(start,start+50);
-      const results=await jsonFetch('https://api.osv.dev/v1/querybatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({queries:chunk.map(p=>({package:{name:p.name,ecosystem:'npm'},version:p.version}))})},signal,fetchImpl);
+      const results=await jsonFetch('https://api.osv.dev/v1/querybatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({queries:chunk.map(p=>({package:{name:p.name,ecosystem:p.ecosystem},version:p.version}))})},signal,fetchImpl);
       if(!Array.isArray(results.results)||results.results.length!==chunk.length)throw new Error('Incomplete OSV response');
-      results.results.forEach((r,i)=>{const p=chunk[i];const checkId=`osv:${p.name}`;
-        if(r.next_page_token)report.source.limitations.push(`Περικοπή OSV για ${p.name}.`);else report.coverage.push(`${scope}|${checkId}`);
-        for(const v of r.vulns||[])report.findings.push(finding(checkId,{module:'source',scope,url:`https://osv.dev/vulnerability/${encodeURIComponent(v.id)}`,subject:repo,severity:'medium',kind:'observed',title:`Γνωστή αναφορά OSV: ${p.name}`,evidence:`${p.name}@${p.version}; ${v.id}. Η αντιστοίχιση έκδοσης δεν αποδεικνύει εκμεταλλευσιμότητα.`,recommendation:'Δες την αναφορά OSV και αναβάθμισε σε έκδοση που διορθώνει την ευπάθεια.'}));
+      results.results.forEach((r,i)=>{const p=chunk[i];const checkId=`osv:${p.name}`;const packageScope=scope+':'+p.ecosystem;
+        if(r.next_page_token)report.source.limitations.push(`Περικοπή OSV για ${p.name}.`);else report.coverage.push(`${packageScope}|${checkId}`);
+        for(const v of r.vulns||[])report.findings.push({...finding(checkId,{module:'source',scope:packageScope,url:`https://osv.dev/vulnerability/${encodeURIComponent(v.id)}`,subject:repo+':'+p.ecosystem+':'+p.version,severity:'medium',kind:'observed',title:`Γνωστή αναφορά OSV: ${p.name}`,evidence:`${p.ecosystem}: ${p.name}@${p.version}; ${v.id}. Η αντιστοίχιση έκδοσης δεν αποδεικνύει εκμεταλλευσιμότητα.`,recommendation:'Δες την αναφορά OSV και αναβάθμισε σε έκδοση που διορθώνει την ευπάθεια.'}),package:p});
       });report.source.packagesChecked+=chunk.length;
     }
     await require('./cve').enrichCVEs(report,{signal,fetchImpl});
     report.modules.source=report.source.limitations.length?'partial':'complete';
     for(const note of report.source.limitations)report.errors.push({module:'source',error:note});
-  }catch(e){report.modules.source='partial';report.errors.push({module:'source',error:safeText(e.message)});}
+  }catch(e){report.coverage=report.coverage.filter(c=>!c.startsWith('dependencies:'));report.modules.source='partial';report.errors.push({module:'source',error:safeText(e.message)});}
 }
 module.exports={parseRepo,inspectSource,packagesFromLock,scanSource};

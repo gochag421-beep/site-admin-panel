@@ -1,16 +1,18 @@
 const {BrowserWindow,session}=require('electron');const {randomUUID}=require('node:crypto');
 const {startBrowserProxy}=require('../src/network');const {finding}=require('../src/findings');const {safeUrl}=require('../src/privacy');
-async function scanBrowser(report,{signal,progress=()=>{}}={}){
+async function scanBrowser(report,{signal,progress=()=>{},cookies=[]}={}){
   report.modules.browser='running';report.browser={pages:[],blockedRequests:0,failedRequests:0};
   const proxy=await startBrowserProxy();const sess=session.fromPartition('scan-'+randomUUID(),{cache:false});let win;
   try{
     await sess.setProxy({proxyRules:`http=127.0.0.1:${proxy.port};https=127.0.0.1:${proxy.port}`,proxyBypassRules:'<-loopback>'});
+    for(const c of cookies)await sess.cookies.set({url:new URL(report.target).origin,name:c.name,value:c.value,path:'/',secure:true,httpOnly:true});
     sess.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));sess.setPermissionCheckHandler(()=>false);
     sess.on('will-download',(event)=>event.preventDefault());
     const pages=report.pagesScanned.filter(u=>!u.includes('REDACTED')).slice(0,3);const origins=new Set(pages.map(u=>new URL(u).origin));let budget=0;let active='';let failed=0;
     sess.webRequest.onBeforeRequest((details,callback)=>{
       const url=details.url;const allowed=/^https?:/.test(url)&&['GET','HEAD'].includes(details.method)&&!['webSocket','ping'].includes(details.resourceType)&&++budget<=300;
       let mainAllowed=true;try{if(details.resourceType==='mainFrame')mainAllowed=origins.has(new URL(url).origin);}catch{mainAllowed=false;}
+      if(cookies.length){try{mainAllowed=mainAllowed&&origins.has(new URL(url).origin)&&!/(logout|signout|delete|remove|unsubscribe)/i.test(new URL(url).pathname);}catch{mainAllowed=false;}}
       if(!allowed||!mainAllowed){report.browser.blockedRequests++;return callback({cancel:true});}callback({});
     });
     const add=(id,title,evidence,subject='')=>{if(!active||report.findings.filter(f=>f.module==='browser').length>=80)return;report.findings.push(finding(id,{module:'browser',scope:`browser:${active}`,url:active,title,severity:'low',kind:'observed',evidence,subject,recommendation:'Αναπαρήγαγε το πρόβλημα στον browser και έλεγξε το Network/Console. Μπορεί να οφείλεται σε τρίτο πάροχο ή στον περιορισμένο έλεγχο.'}));};

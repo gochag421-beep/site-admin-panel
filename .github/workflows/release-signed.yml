@@ -1,0 +1,36 @@
+name: Publish signed Windows update
+on:
+  workflow_dispatch:
+    inputs:
+      publisher:
+        description: Exact certificate publisher name
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:desktop
+      - name: Require signing credentials and configure verified updates
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          VEXON_PUBLISHER: ${{ inputs.publisher }}
+        run: |
+          if (-not $env:CSC_LINK -or -not $env:CSC_KEY_PASSWORD) { throw 'Configure Windows signing certificate secrets before publishing.' }
+          node -e "const fs=require('fs');const p=require('./package.json');p.build.win.publisherName=process.env.VEXON_PUBLISHER;p.build.forceCodeSigning=true;fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
+      - name: Build signed installer and publish update metadata
+        run: npx electron-builder --win nsis --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
