@@ -45,6 +45,7 @@ async function scanSource(repository,report,{token,signal,progress=()=>{},fetchI
         for(const v of r.vulns||[])report.findings.push(finding(checkId,{module:'source',scope,url:`https://osv.dev/vulnerability/${encodeURIComponent(v.id)}`,subject:repo,severity:'medium',kind:'observed',title:`Γνωστή αναφορά OSV: ${p.name}`,evidence:`${p.name}@${p.version}; ${v.id}. Η αντιστοίχιση έκδοσης δεν αποδεικνύει εκμεταλλευσιμότητα.`,recommendation:'Δες την αναφορά OSV και αναβάθμισε σε έκδοση που διορθώνει την ευπάθεια.'}));
       });report.source.packagesChecked+=chunk.length;
     }
+    await require('./cve').enrichCVEs(report,{signal,fetchImpl});
     report.modules.source=report.source.limitations.length?'partial':'complete';
     for(const note of report.source.limitations)report.errors.push({module:'source',error:note});
   }catch(e){report.modules.source='partial';report.errors.push({module:'source',error:safeText(e.message)});}

@@ -1,9 +1,9 @@
-const {app,BrowserWindow,ipcMain,dialog,safeStorage,Notification,Tray,Menu,nativeImage}=require('electron');
+const {app,BrowserWindow,ipcMain,dialog,safeStorage,Notification,Tray,Menu,nativeImage,shell}=require('electron');
 const path=require('node:path');const fs=require('node:fs');const {pathToFileURL}=require('node:url');
 const {runScan}=require('../src/scanner');const {scanBrowser}=require('./browser-scan');const {scanSource,parseRepo}=require('../src/source');
 const {summarize}=require('../src/findings');const {sanitize}=require('../src/privacy');const {Store,atomic}=require('../src/store');
 const {analyzeWithOpenRouter}=require('../src/openrouter');const {createPDF}=require('./pdf');
-let win,tray,store,busy=false,controller,timer,quitting=false;
+let win,tray,store,busy=false,controller,timer,quitting=false,live='Αναμονή';
 const index=pathToFileURL(path.join(__dirname,'../renderer/index.html')).href;
 const settingsFile=()=>path.join(app.getPath('userData'),'settings.json');
 function rawSettings(){try{return JSON.parse(fs.readFileSync(settingsFile(),'utf8'));}catch{return {};}}
@@ -18,16 +18,26 @@ function saveSettings(value){const raw=rawSettings();for(const name of ['apiKey'
   atomic(settingsFile(),raw);return settings();
 }
 function emit(channel,data){if(win&&!win.isDestroyed())win.webContents.send(channel,data);}
-function progress(data){emit('scan:progress',data);}
+function progress(data){live=data.message;emit('scan:progress',data);}
 function notify(title,body){if(settings().notifications&&Notification.isSupported()){const n=new Notification({title,body});n.on('click',()=>{win.show();win.focus();});n.show();}}
-async function runProject(id,{scheduled=false}={}){
+async function runProject(id,{scheduled=false,mode='full'}={}){
   if(busy)throw new Error('Υπάρχει σάρωση σε εξέλιξη.');const project={...store.project(id)};if(!project.authorized)throw new Error('Δεν υπάρχει επιβεβαίωση εξουσιοδότησης.');
   busy=true;controller=new AbortController();const signal=controller.signal;let report;
   try{
     progress({stage:'start',percent:1,message:`Σάρωση: ${project.name}`});
-    report=await runScan(project.url,{maxPages:project.maxPages,progress,signal});
-    if(project.browser&&!signal.aborted&&report.pagesScanned.length)await scanBrowser(report,{signal,progress});
-    if(project.repository&&!signal.aborted)await scanSource(project.repository,report,{token:secret('githubToken'),signal,progress});
+    report=await runScan(project.url,{maxPages:mode==='http'||mode==='cve'?1:project.maxPages,progress,signal});
+    if((mode==='browser'||(mode==='full'&&project.browser))&&!signal.aborted&&report.pagesScanned.length)await scanBrowser(report,{signal,progress});
+    if(project.repository&&['full','cve'].includes(mode)&&!signal.aborted)await scanSource(project.repository,report,{token:secret('githubToken'),signal,progress});
+    report.mode=mode;
+    if(mode==='cve'&&!signal.aborted){
+      report.cveCandidates=[];
+      for(const tech of (report.technologies||[]).slice(0,3)){
+        try{progress({stage:'cve',percent:78,message:'NVD: '+tech.name+' '+(tech.version||'')});const result=await require('../src/cve').searchCVEs(tech.name,{signal});report.cveCandidates.push({...result,detected:tech});}
+        catch(e){report.errors.push({module:'cve',error:String(e.message)});}
+      }
+      if(!project.repository)report.errors.push({module:'cve',error:'Δεν συνδέθηκε repository. Τα αποτελέσματα NVD είναι μόνο υποψήφια. Για ακριβή σύγκριση εξαρτήσεων σύνδεσε repository με package-lock.json.'});
+      if(!project.repository&&!report.technologies?.length)report.errors.push({module:'cve',error:'Δεν αναγνωρίστηκαν τεχνολογίες. Μπορείς να ζητήσεις από το chat αναζήτηση για συγκεκριμένο προϊόν ή CVE ID.'});
+    }
     if(project.useAI&&!signal.aborted&&report.pagesScanned.length){
       const apiKey=secret('apiKey');
       if(apiKey){progress({stage:'ai',percent:84,message:'Ανάλυση ευρημάτων…'});try{
@@ -44,6 +54,8 @@ async function runProject(id,{scheduled=false}={}){
 async function tick(){if(busy)return;const due=store.due()[0];if(!due)return;store.advance(due.id);try{await runProject(due.id,{scheduled:true});}catch{notify('Vexon · Σάρωση δεν ολοκληρώθηκε',due.name);}}
 function handle(name,fn){ipcMain.handle(name,(event,...args)=>{if(event.sender!==win.webContents)throw new Error('Untrusted IPC sender');return fn(...args);});}
 function setupIPC(){
+  require('./chat-controller').setupChat({handle,store,getKey:()=>secret('apiKey'),runProject,isBusy:()=>busy,getLive:()=>live,cancel:()=>controller?.abort(),emit});
+  handle('source:open',async value=>{const u=new URL(value);if(u.protocol!=='https:'||!['nvd.nist.gov','osv.dev'].includes(u.hostname)||u.username||u.password)throw new Error('Επιτρέπονται μόνο επίσημοι σύνδεσμοι NVD / OSV.');await shell.openExternal(u.href);});
   handle('workspace:get',()=>({projects:store.list(),history:store.history(),settings:settings(),busy}));
   handle('project:save',p=>{if(busy)throw new Error('Περίμενε να ολοκληρωθεί η σάρωση.');if(p.repository)p.repository=parseRepo(p.repository);return store.saveProject(p);});
   handle('scan:run',id=>runProject(id));handle('scan:cancel',()=>{controller?.abort();return true;});

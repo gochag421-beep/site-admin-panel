@@ -1,5 +1,5 @@
 const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');
-const {runScan,inspectPage}=require('../src/scanner');const {finding,compareReports}=require('../src/findings');const {publicIP}=require('../src/network');const {Store}=require('../src/store');const {inspectSource,packagesFromLock,scanSource}=require('../src/source');const {sanitize}=require('../src/privacy');const {reportHtml}=require('../src/report-html');
+const {runScan,inspectPage}=require('../src/scanner');const {finding,compareReports}=require('../src/findings');const {publicIP}=require('../src/network');const {Store}=require('../src/store');const {inspectSource,packagesFromLock,scanSource}=require('../src/source');const {sanitize}=require('../src/privacy');const {reportHtml}=require('../src/report-html');const {osvDetails,nvdRecords,searchCVEs}=require('../src/cve');const {directIntent,chooseIntent}=require('../src/chat');
 const blank=()=>({findings:[],coverage:[],errors:[],modules:{},pagesScanned:[],summary:{score:null,total:0}});
 const response=body=>({status:200,headers:{'content-type':'text/html'},body});
 test('failed scan has no score and cannot resolve old findings',async()=>{
@@ -35,7 +35,8 @@ test('projects, history, status and schedule survive a restart',()=>{
     assert.equal(s.due(Date.now()).length,0);assert.equal(s.due(Date.now()+86400010).length,1);
     const r=blank();r.target=p.url;r.status='complete';r.findings=[finding('csp',{url:p.url,title:'CSP'})];const saved=s.saveReport(p.id,r);
     s.setStatus(saved.id,saved.findings[0].id,'needs_verification');
-    const again=new Store(dir);assert.equal(again.history().length,1);assert.equal(again.report(saved.id).findings[0].status,'needs_verification');assert.equal(again.project(p.id).name,'Client');
+    s.addChat(p.id,'user','Έλεγξε SSL');s.saveResearch(p.id,{query:'nginx',items:[]});
+    const again=new Store(dir);assert.equal(again.history().length,1);assert.equal(again.report(saved.id).findings[0].status,'needs_verification');assert.equal(again.project(p.id).name,'Client');assert.equal(again.chat(p.id)[0].text,'Έλεγξε SSL');assert.equal(again.research(p.id).query,'nginx');
     assert.throws(()=>again.report('../settings.json'),/Invalid/);assert.throws(()=>again.setStatus(saved.id,saved.findings[0].id,'resolved'),/επανέλεγχο/);
   }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
@@ -54,7 +55,18 @@ test('source scan ties OSV matches to pinned package versions using a fixed comm
     else if(url.includes('/git/trees/abc123'))data={tree:[{type:'blob',path:'package-lock.json',size:100,sha:'blob1'}]};
     else if(url.endsWith('/git/blobs/blob1'))data={encoding:'base64',content:Buffer.from(JSON.stringify(lock)).toString('base64')};
     else if(url.endsWith('/querybatch'))data={results:[{vulns:[{id:'GHSA-demo'}]}]};
+    else if(url.endsWith('/vulns/GHSA-demo'))data={id:'GHSA-demo',aliases:['CVE-2026-12345'],summary:'Demo advisory',database_specific:{severity:'HIGH'},severity:[{type:'CVSS_V3',score:'CVSS:3.1/AV:N'}],affected:[{package:{name:'demo'},ranges:[{events:[{fixed:'1.0.1'}]}]}]};
     else throw new Error('Unexpected '+url);
     return {ok:true,json:async()=>data};};
-  await scanSource('a/b',r,{fetchImpl});assert.equal(r.modules.source,'complete');assert.equal(r.source.packagesChecked,1);assert.ok(r.findings.some(f=>f.evidence.includes('demo@1.0.0')));assert.ok(calls.some(c=>c.url.includes('abc123')));
+  await scanSource('a/b',r,{fetchImpl});assert.equal(r.modules.source,'complete');assert.equal(r.source.packagesChecked,1);assert.ok(r.findings.some(f=>f.evidence.includes('demo@1.0.0')));assert.equal(r.findings[0].vulnerability.cves[0],'CVE-2026-12345');assert.ok(calls.some(c=>c.url.includes('abc123')));
+});
+test('CVE details keep exact OSV package matching distinct from NVD candidates',async()=>{
+  const detail=osvDetails({id:'GHSA-x',aliases:['CVE-2025-9999'],affected:[{package:{name:'demo'},ranges:[{events:[{fixed:'2.0.0'}]}]}],severity:[{type:'CVSS_V3',score:'CVSS:3.1/AV:N'}]},'demo');
+  assert.deepEqual(detail.cves,['CVE-2025-9999']);assert.deepEqual(detail.fixes,['2.0.0']);
+  const records=nvdRecords({vulnerabilities:[{cve:{id:'CVE-2025-9999',vulnStatus:'Analyzed',descriptions:[{lang:'en',value:'Candidate only'}],metrics:{cvssMetricV31:[{cvssData:{baseScore:8.1,baseSeverity:'HIGH',vectorString:'CVSS:3.1/X'}}]}}}]});assert.equal(records[0].match,'candidate');
+  const result=await searchCVEs('demo',{fetchImpl:async()=>({ok:true,json:async()=>({totalResults:1,vulnerabilities:[]})})});assert.equal(result.total,1);assert.equal(result.items.length,0);
+});
+test('Greeklish chat commands are deterministic and AI plans remain allowlisted',async()=>{
+  assert.deepEqual(directIntent('κανε scan για CVE'),{action:'scan_cve'});assert.deepEqual(directIntent('ψάξε CVE για nginx'),{action:'search_cve',query:'nginx'});assert.deepEqual(directIntent('σταμάτα'),{action:'cancel'});
+  const plan=await chooseIntent('anything',async()=>({text:'{"action":"terminal","command":"bad"}'}));assert.deepEqual(plan,{action:'explain'});
 });

@@ -11,6 +11,10 @@ app.whenReady().then(async()=>{
     const project=await run(`window.vexon.saveProject({name:'Desktop QA',client:'Test client',url:'http://127.0.0.1',authorized:true,browser:false,useAI:false,schedule:'off'})`);
     const report=await run(`window.vexon.scan(${JSON.stringify(project.id)})`);assert.equal(report.status,'failed');assert.equal(report.summary.score,null);
     const state=await run('window.vexon.workspace()');assert.equal(state.history.length,1);
+    await run(`window.vexon.sendChat(${JSON.stringify(project.id)},'κατάσταση')`);
+    const chat=await run(`window.vexon.chat(${JSON.stringify(project.id)})`);assert.equal(chat.messages.length,2);assert.match(chat.messages[1].text,/σάρωση/);
+    await run(`document.querySelector('#chatProject').value=${JSON.stringify(project.id)};document.querySelector('#chatProject').dispatchEvent(new Event('change'));show('chat')`);await new Promise(r=>setTimeout(r,200));
+    assert.equal(await run(`document.querySelector('#chat').hidden`),false);
     const loaded=await run(`window.vexon.report(${JSON.stringify(report.id)})`);assert.equal(loaded.id,report.id);
     await run(`renderReport(${JSON.stringify(report)});show('report')`);assert.equal(await run(`document.querySelector('#report').hidden`),false);
     await run('refresh();show("overview")');await new Promise(r=>setTimeout(r,300));

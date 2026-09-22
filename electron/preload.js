@@ -1,5 +1,9 @@
 const {contextBridge,ipcRenderer}=require('electron');
 contextBridge.exposeInMainWorld('vexon',{
+  chat:id=>ipcRenderer.invoke('chat:get',id),
+  sendChat:(id,text)=>ipcRenderer.invoke('chat:send',id,text),
+  openSource:url=>ipcRenderer.invoke('source:open',url),
+  onChat:fn=>ipcRenderer.on('chat:message',(_,data)=>fn(data)),
   workspace:()=>ipcRenderer.invoke('workspace:get'),
   saveProject:p=>ipcRenderer.invoke('project:save',p),
   scan:id=>ipcRenderer.invoke('scan:run',id),

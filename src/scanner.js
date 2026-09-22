@@ -25,6 +25,12 @@ function inspectPage(url,response,report) {
     }
   }
   const $=cheerio.load(response.body);
+  report.technologies||=[];
+  const hints=[String(h.server||''),String(h['x-powered-by']||''),$('meta[name="generator"]').attr('content')||''];
+  for(const hint of hints){for(const name of ['WordPress','Drupal','Joomla','nginx','Apache','PHP']){
+    const match=hint.match(new RegExp(name+'(?:[ /]+([0-9]+(?:\\.[0-9]+){1,3}))?','i'));
+    if(match&&!report.technologies.some(t=>t.name===name))report.technologies.push({name,version:match[1]||null,evidence:safeText(hint),confidence:'banner-unverified'});
+  }}
   $('form').each((_,el)=>{try{const action=new URL($(el).attr('action')||url,url);if(action.protocol==='http:'&&url.startsWith('https:'))add('form-http',{title:'Φόρμα υποβάλλεται μέσω HTTP',severity:'high',kind:'observed',subject:safeUrl(action.href),evidence:safeUrl(action.href),recommendation:'Χρησιμοποίησε HTTPS για την υποβολή της φόρμας.'});}catch{}});
   $('script[src],img[src],iframe[src],link[rel="stylesheet"][href],video[src],audio[src]').each((_,el)=>{
     try{const asset=new URL($(el).attr('src')||$(el).attr('href'),url);if(asset.protocol==='http:'&&url.startsWith('https:'))add('mixed',{title:'Πόρος με μη κρυπτογραφημένο URL',severity:'medium',kind:'observed',subject:safeUrl(asset.href),evidence:safeUrl(asset.href),recommendation:'Αντικατάστησε τον πόρο με HTTPS. Ο browser μπορεί να τον μπλοκάρει ή να τον αναβαθμίζει.'});
