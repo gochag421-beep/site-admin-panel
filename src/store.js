@@ -14,6 +14,10 @@ class Store {
     const p={id:prior?.id||randomUUID(),name:String(input.name||u.hostname).slice(0,120),client:String(input.client||'').slice(0,120),url:u.href,repository:String(input.repository||'').trim(),authorized:true,browser:input.browser!==false,useAI:Boolean(input.useAI),maxPages:Math.min(20,Math.max(1,Number(input.maxPages)||10)),schedule,nextRun:prior?.schedule===schedule?prior.nextRun:(schedule==='off'?null:new Date(Date.now()+interval(schedule)).toISOString()),createdAt:prior?.createdAt||new Date().toISOString()};
     if(prior)Object.assign(prior,p);else this.data.projects.push(p);this.commit();return p;
   }
+  chat(projectId){this.project(projectId);return (this.data.chats||{})[projectId]||[];}
+  addChat(projectId,role,text,extra={}){this.project(projectId);this.data.chats||={};const entries=this.data.chats[projectId]||=[];const message={id:randomUUID(),role,text:String(text).slice(0,16000),createdAt:new Date().toISOString(),...extra};entries.push(message);this.data.chats[projectId]=entries.slice(-100);this.commit();return message;}
+  saveResearch(projectId,value){this.project(projectId);this.data.research||={};this.data.research[projectId]=value;this.commit();}
+  research(projectId){return this.data.research?.[projectId]||null;}
   history(projectId){return this.data.reports.filter(r=>!projectId||r.projectId===projectId).slice().reverse();}
   report(id){if(!/^[a-f0-9-]{36}$/.test(id))throw new Error('Invalid report ID');return JSON.parse(fs.readFileSync(path.join(this.dir,'reports',id+'.json'),'utf8'));}
   saveReport(projectId,report){const prior=this.data.reports.filter(r=>r.projectId===projectId).at(-1);report.id=randomUUID();report.projectId=projectId;report.completedAt=new Date().toISOString();
